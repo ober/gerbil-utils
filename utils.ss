@@ -313,3 +313,137 @@ namespace: utils
 (def (error-print msg (code 2))
   (displayln "Error: " msg)
   (exit code))
+
+(def (format-string-size string size)
+  (unless (string? string)
+    (set! string (format "~a" string)))
+  (let* ((string (string-trim-both string))
+         (our-size (string-length string))
+         (delta (if (> size our-size)
+                  (- size our-size)
+                  0)))
+    ;;    (displayln "fss: delta: " delta " string: " string " our-size: " our-size " size: " size)
+    (format " ~a~a" string (make-string delta #\space))))
+
+(def (style-output infos)
+  (let-hash (load-config)
+    (when (list? infos)
+      (let* ((sizes (hash))
+             (data (reverse infos))
+             (header (car data))
+             (rows (cdr data)))
+        (for (head header)
+             (unless (string? head) (displayln "head is not string: " head) (exit 2))
+             (hash-put! sizes head (string-length head)))
+        (for (row rows)
+             (let (count 0)
+               (for (column row)
+                    (let* ((col-name (nth count header))
+                           (current-size (hash-ref sizes col-name))
+                           (this-size (if (string? column) (string-length column) (string-length (format "~a" column)))))
+                      (when (> this-size current-size)
+                        (hash-put! sizes col-name this-size))
+                      ;;		      (displayln "colname: " col-name " col: " count " current-size: " current-size " this-size: " this-size " column: " column)
+                      (set! count (1+ count))))))
+
+        (for (head header)
+             (display (format "| ~a" (format-string-size head (hash-get sizes head)))))
+
+        ;; print header
+        (displayln "|")
+        (let ((count 0))
+          (for (head header)
+               (let ((sep (if (= count 0) "|" "+")))
+                 (display (format "~a~a" sep (make-string (+ 2 (hash-get sizes (nth count header))) #\-))))
+               (set! count (1+ count))))
+        (displayln "|")
+
+        (for (row rows)
+             (let (count 0)
+               (for (col row)
+                    (display (format "|~a " (format-string-size col (hash-ref sizes (nth count header)))))
+                    (set! count (1+ count))))
+             (displayln "|"))
+        ))))
+
+(def (print-header style header)
+  (let-hash (load-config)
+    (cond
+     ((string=? style "org-mode")
+      (displayln "| " (string-join header " | ") " |")
+      (displayln "|-|"))
+     (else
+      (displayln "Unknown format: " style)))))
+
+(def (print-row style data)
+  (if (list? data)
+    (cond
+     ((string=? style "org-mode")
+      (org-mode-print-row data))
+     (else
+      (displayln "Unknown format! " style)))))
+
+(def (org-mode-print-row data)
+  (when (list? data)
+    (for (datum data)
+         (printf "| ~a " datum))
+    (displayln "|")))
+
+(def (flatten x)
+  (cond ((null? x) [])
+        ((pair? x) (append (flatten (car x)) (flatten (cdr x))))
+        (else (list x))))
+
+(def (date->custom dt)
+  (date->string (string->date dt "~Y-~m-~dT~H:~M:~S~z") "~a ~b ~d ~Y"))
+
+(def (print-curl type uri headers data)
+  ;;(displayln headers)
+  (let ((heads "Content-type: application/json")
+        (do-curl (getenv "DEBUG" #f)))
+    (when do-curl
+      (cond
+       ((string=? type "get")
+        (if (string=? "" data)
+          (displayln (format "curl -X GET -H \'~a\' ~a" heads uri))
+          (displayln (format "curl -X GET -H \'~a\' -d \'~a\' ~a" heads data uri))))
+       ((string=? type "put")
+        (displayln (format "curl -X PUT -H \'~a\' -d \'~a\' ~a" heads data uri)))
+       ((string=? type "post")
+        (displayln (format "curl -X POST -H \'~a\' -d \'~a\' ~a" heads data uri)))
+       ((string=? type "delete")
+        (displayln (format "curl -X DELETE -H \'~a\' -d \'~a\' ~a" heads data uri)))
+       (else
+        (displayln "unknown format " type))))))
+
+(def (get-new-ip uri host)
+  (pregexp-replace "[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}" uri (resolve-ipv4 host)))
+
+(def (resolve-ipv4 host)
+  (if (hash-key? good-ips host)
+    (hash-get good-ips host)
+    (let* ((host-info (host-info-addresses (host-info host))))
+      (dp (format "host-info: ~a type:~a" host-info (type-of host-info)))
+      (ip4-address->string
+       (car host-info)))))
+
+(def (make-basic-auth user password)
+  (format "Basic ~a"
+          (base64-encode
+           (string->utf8 (format "~a:~a" user password)))))
+
+(def (read-password prompt)
+  (let ((password ""))
+    (displayln prompt)
+    ;;(##tty-mode-set! (current-input-port) #!void #f #!void #!void #!void)
+    (set! password (read-line))
+    ;;(##tty-mode-set! (current-input-port) #!void #t #!void #!void #!void)
+    password))
+
+(def (nth n l)
+  "Implement nth for gerbil. fetch n argument from list"
+  (if (or (> n (length l)) (< n 0))
+    (error "Index out of bounds.")
+    (if (eq? n 0)
+      (car l)
+      (nth (- n 1) (cdr l)))))
