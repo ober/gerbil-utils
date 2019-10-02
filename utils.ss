@@ -2,8 +2,13 @@
 namespace: utils
 
 (def version "0.0.1")
-(export main)
+
+(export #t)
+
 (declare (not optimize-dead-definitions))
+
+(def program-name "generic")
+(def config-file "~/.gerbil.yaml")
 
 (import
   :gerbil/gambit
@@ -42,18 +47,16 @@ namespace: utils
 (import (rename-in :gerbil/gambit/os (current-time builtin-current-time)))
 (import (rename-in :gerbil/gambit/os (time mytime)))
 
+(def DEBUG (getenv "DEBUG" #f))
 (def (dp msg)
   (when DEBUG
     (displayln msg)))
 
 (def (resolve-ipv4 host)
-  (if (hash-key? good-ips host)
-    (hash-get good-ips host)
-    (let* ((host-info (host-info-addresses (host-info host))))
-      (dp (format "host-info: ~a type:~a" host-info (type-of host-info)))
-      (ip4-address->string
-       (car host-info)))))
-
+  (let* ((host-info (host-info-addresses (host-info host))))
+    (dp (format "host-info: ~a type:~a" host-info (type-of host-info)))
+    (ip4-address->string
+     (car host-info))))
 
 (def (do-get-generic uri headers)
   (let* ((reply (http-get uri
@@ -65,18 +68,15 @@ namespace: utils
       text
       (displayln (format "Error: got ~a on request. text: ~a~%" status text)))))
 
+(def interactives
+  (hash
+   ("generic" (hash (description: "Generic description") (usage: "generic <argument 1> <argument 2>") (count: 2)))))
+
 (def (usage-verb verb)
   (let ((howto (hash-get interactives verb)))
     (displayln "Wrong number of arguments. Usage is:")
     (displayln program-name " " (hash-get howto usage:))
     (exit 2)))
-
-(def (nth n l)
-  (if (or (> n (length l)) (< n 0))
-    (error "Index out of bounds.")
-    (if (eq? n 0)
-      (car l)
-      (nth (- n 1) (cdr l)))))
 
 (def (float->int num)
   (inexact->exact
@@ -93,11 +93,6 @@ namespace: utils
 
 (def (date->epoch mydate)
   (string->number (date->string (string->date mydate "~Y-~m-~d ~H:~M:~S") "~s")))
-
-(def (flatten x)
-  (cond ((null? x) [])
-	((pair? x) (append (flatten (car x)) (flatten (cdr x))))
-	(else [x])))
 
 (def (encrypt-string str)
   (let* ((cipher (make-aes-256-ctr-cipher))
@@ -419,13 +414,6 @@ namespace: utils
 (def (get-new-ip uri host)
   (pregexp-replace "[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}" uri (resolve-ipv4 host)))
 
-(def (resolve-ipv4 host)
-  (if (hash-key? good-ips host)
-    (hash-get good-ips host)
-    (let* ((host-info (host-info-addresses (host-info host))))
-      (dp (format "host-info: ~a type:~a" host-info (type-of host-info)))
-      (ip4-address->string
-       (car host-info)))))
 
 (def (make-basic-auth user password)
   (format "Basic ~a"
@@ -447,3 +435,25 @@ namespace: utils
     (if (eq? n 0)
       (car l)
       (nth (- n 1) (cdr l)))))
+
+(def (load-config)
+  (let ((config (hash)))
+    (hash-for-each
+     (lambda (k v)
+       (hash-put! config (string->symbol k) v))
+     (car (yaml-load config-file)))
+    (let-hash config
+      (hash-put! config 'style (or .?style "org-mode"))
+      (when .?secrets
+	(let-hash (u8vector->object (base64-decode .secrets))
+	  (let ((password (get-password-from-config .key .iv .password)))
+	    (hash-put! config 'basic-auth (make-basic-auth ..?user password))))))
+    config))
+
+(def (get-password-from-config key iv password)
+  (bytes->string
+   (decrypt
+    (make-aes-256-ctr-cipher)
+    (base64-string->u8vector key)
+    (base64-string->u8vector iv)
+    (base64-string->u8vector password))))
